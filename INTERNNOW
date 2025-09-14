@@ -1,0 +1,277 @@
+// QualificationConnector.jsx
+// React + Tailwind component (single-file example) + Node/Express backend snippet
+// Instructions (at top of file):
+// 1) Register a LinkedIn app at https://www.linkedin.com/developers and set Redirect URI to your backend callback.
+// 2) Set environment variables: LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, BACKEND_BASE_URL (e.g. https://yourdomain.com)
+// 3) Note: LinkedIn's Profile/Education fields require specific API permissions and sometimes partner approval. See LinkedIn docs.
+
+import React, {useState, useEffect} from 'react';
+
+export default function QualificationConnector({onSave}) {
+  const [mode, setMode] = useState('manual'); // 'manual' or 'linkedin'
+  const [qualifications, setQualifications] = useState([{
+    id: Date.now(),
+    school: '',
+    degree: '',
+    fieldOfStudy: '',
+    startYear: '',
+    endYear: ''
+  }]);
+  const [loadingLinkedIn, setLoadingLinkedIn] = useState(false);
+  const [linkedInProfile, setLinkedInProfile] = useState(null);
+  const [error, setError] = useState(null);
+
+  // Helper to add a blank qualification row
+  function addRow() {
+    setQualifications(prev => [...prev, {id: Date.now(), school: '', degree: '', fieldOfStudy: '', startYear: '', endYear: ''}]);
+  }
+
+  // Helper to remove row
+  function removeRow(id) {
+    setQualifications(prev => prev.filter(r => r.id !== id));
+  }
+
+  // Handle input change
+  function updateRow(id, field, value) {
+    setQualifications(prev => prev.map(r => r.id === id ? {...r, [field]: value} : r));
+  }
+
+  // Submit manual qualifications
+  function submitManual(e) {
+    e.preventDefault();
+    // Basic validation can be extended
+    const cleaned = qualifications.map(q => ({...q})).filter(q => q.school || q.degree);
+    if (onSave) onSave({source: 'manual', qualifications: cleaned});
+  }
+
+  // Kick off LinkedIn login by navigating to backend auth endpoint
+  function connectLinkedIn() {
+    setError(null);
+    setLoadingLinkedIn(true);
+    // This endpoint should redirect the user to LinkedIn's auth page
+    window.location.href = '/api/auth/linkedin';
+  }
+
+  // Poll for a temporary session flag or provide a way for backend to push profile after callback.
+  // Simplest approach: after LinkedIn callback, backend sets a short-lived session and redirects user back to /qualifications?linkedin=done
+  useEffect(() => {
+    // If the app was redirected back after LinkedIn, the backend should have stored the fetched profile on the session
+    // Frontend can call an endpoint to get it
+    async function fetchLinkedInProfile() {
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('linkedin') === 'done') {
+          setLoadingLinkedIn(true);
+          const res = await fetch('/api/auth/linkedin/profile');
+          if (!res.ok) throw new Error('Failed to fetch LinkedIn profile');
+          const data = await res.json();
+          if (data && data.educations && data.educations.length) {
+            // Convert into our qualifications format
+            const q = data.educations.map((ed, idx) => ({
+              id: Date.now() + idx,
+              school: ed.school?.name || ed.schoolName || ed.schoolNamePlain || ed.institution || '',
+              degree: ed.degreeName || ed.degree || '',
+              fieldOfStudy: ed.fieldOfStudy || ed.major || '',
+              startYear: ed.startDate?.year || (ed.startYear || ''),
+              endYear: ed.endDate?.year || (ed.endYear || '')
+            }));
+            setQualifications(q.length ? q : qualifications);
+          }
+          setLinkedInProfile(data || null);
+          setLoadingLinkedIn(false);
+          // Clear query param (optional)
+          const cleanUrl = window.location.pathname;
+          window.history.replaceState({}, '', cleanUrl);
+          if (onSave) onSave({source: 'linkedin', profile: data, qualifications});
+        }
+      } catch (err) {
+        console.error(err);
+        setError(err.message || 'Error fetching LinkedIn profile');
+        setLoadingLinkedIn(false);
+      }
+    }
+    fetchLinkedInProfile();
+  }, []);
+
+  return (
+    <div className="max-w-3xl mx-auto p-4 bg-white rounded-2xl shadow-md">
+      <h2 className="text-xl font-semibold mb-3">Add your qualifications</h2>
+
+      <div className="flex gap-2 mb-4">
+        <button className={`px-3 py-1 rounded ${mode==='manual' ? 'bg-slate-900 text-white' : 'bg-slate-100'}`} onClick={()=>setMode('manual')}>Enter manually</button>
+        <button className={`px-3 py-1 rounded ${mode==='linkedin' ? 'bg-slate-900 text-white' : 'bg-slate-100'}`} onClick={()=>setMode('linkedin')}>Connect with LinkedIn</button>
+      </div>
+
+      {mode === 'manual' && (
+        <form onSubmit={submitManual} className="space-y-4">
+          {qualifications.map((row, i) => (
+            <div key={row.id} className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
+              <div>
+                <label className="text-sm">School</label>
+                <input value={row.school} onChange={e=>updateRow(row.id,'school',e.target.value)} className="w-full border rounded px-2 py-1" placeholder="University / College" />
+              </div>
+              <div>
+                <label className="text-sm">Degree</label>
+                <input value={row.degree} onChange={e=>updateRow(row.id,'degree',e.target.value)} className="w-full border rounded px-2 py-1" placeholder="B.Sc, M.Tech..." />
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-sm">Field</label>
+                  <input value={row.fieldOfStudy} onChange={e=>updateRow(row.id,'fieldOfStudy',e.target.value)} className="w-full border rounded px-2 py-1" placeholder="Computer Science" />
+                </div>
+                <div className="w-24">
+                  <label className="text-sm">Start</label>
+                  <input value={row.startYear} onChange={e=>updateRow(row.id,'startYear',e.target.value)} className="w-full border rounded px-2 py-1" placeholder="YYYY" />
+                </div>
+                <div className="w-24">
+                  <label className="text-sm">End</label>
+                  <input value={row.endYear} onChange={e=>updateRow(row.id,'endYear',e.target.value)} className="w-full border rounded px-2 py-1" placeholder="YYYY / Present" />
+                </div>
+              </div>
+              <div className="col-span-full flex justify-end gap-2">
+                <button type="button" onClick={addRow} className="px-3 py-1 rounded bg-slate-100">Add</button>
+                <button type="button" onClick={()=>removeRow(row.id)} className="px-3 py-1 rounded bg-rose-100">Remove</button>
+              </div>
+            </div>
+          ))}
+
+          <div className="flex justify-between items-center">
+            <div className="text-sm text-slate-600">Or you can connect your LinkedIn to import automatically.</div>
+            <div>
+              <button type="submit" className="px-4 py-2 rounded bg-slate-900 text-white">Save</button>
+            </div>
+          </div>
+        </form>
+      )}
+
+      {mode === 'linkedin' && (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">We will attempt to get your education & profile from LinkedIn. You will be redirected to LinkedIn to consent.</p>
+          <div>
+            <button onClick={connectLinkedIn} disabled={loadingLinkedIn} className="px-4 py-2 rounded bg-blue-600 text-white">{loadingLinkedIn ? 'Redirecting...' : 'Connect with LinkedIn'}</button>
+          </div>
+
+          {loadingLinkedIn && <div className="text-sm">Waiting for LinkedIn response...</div>}
+          {error && <div className="text-sm text-red-600">{error}</div>}
+
+          {linkedInProfile && (
+            <div className="border p-3 rounded">
+              <div className="font-semibold">LinkedIn profile</div>
+              <pre className="text-xs overflow-auto max-h-40">{JSON.stringify(linkedInProfile, null, 2)}</pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* --------------------------- Backend snippet (Node.js + Express) ---------------------------
+Place this on your server (example: server.js). This is a minimal example of the 3-legged OAuth flow.
+You must replace placeholders and secure your secrets. Use HTTPS in production.
+
+Environment variables required:
+- LINKEDIN_CLIENT_ID
+- LINKEDIN_CLIENT_SECRET
+- BACKEND_BASE_URL (e.g. https://yourdomain.com)
+
+Note: LinkedIn user profile fields and educations may require additional permissions or partner access. If you need to read "educations" you might need to request extra scopes or use partner APIs. See LinkedIn docs.
+
+Run: npm install express node-fetch express-session dotenv
+---------------------------------------------------------------------------------------------*/
+
+/*
+// server.js
+require('dotenv').config();
+const express = require('express');
+const fetch = require('node-fetch');
+const session = require('express-session');
+const app = express();
+
+app.use(session({secret: 'replace-with-secure-secret', resave:false, saveUninitialized:true}));
+
+const CLIENT_ID = process.env.LINKEDIN_CLIENT_ID;
+const CLIENT_SECRET = process.env.LINKEDIN_CLIENT_SECRET;
+const BASE = process.env.BACKEND_BASE_URL || 'http://localhost:3000';
+
+app.get('/api/auth/linkedin', (req, res) => {
+  const redirectUri = `${BASE}/api/auth/linkedin/callback`;
+  const state = Math.random().toString(36).substring(2);
+  req.session.linkedin_oauth_state = state;
+  const scope = encodeURIComponent('r_liteprofile r_emailaddress');
+  const url = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&scope=${scope}`;
+  res.redirect(url);
+});
+
+app.get('/api/auth/linkedin/callback', async (req, res) => {
+  try {
+    const {code, state} = req.query;
+    if (state !== req.session.linkedin_oauth_state) return res.status(400).send('Invalid state');
+    const tokenRes = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
+      method: 'POST',
+      headers: {'Content-Type':'application/x-www-form-urlencoded'},
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: `${BASE}/api/auth/linkedin/callback`,
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET
+      })
+    });
+    const tokenJson = await tokenRes.json();
+    const accessToken = tokenJson.access_token;
+    if (!accessToken) return res.status(400).send('Failed to obtain access token');
+
+    // Fetch basic profile
+    const profileRes = await fetch('https://api.linkedin.com/v2/me', {
+      headers: {Authorization: `Bearer ${accessToken}`}
+    });
+    const profileJson = await profileRes.json();
+
+    // Attempt to fetch educations. NOTE: reading education fields may require extra permissions / partner access.
+    // LinkedIn does not guarantee education fields in the lite profile. If your app has access to the Profile API education subresource, use the appropriate endpoint.
+    // This is a best-effort example showing how you might request educations if permitted.
+    let educations = [];
+    try {
+      const eduRes = await fetch(`https://api.linkedin.com/v2/educations?q=members&members=List(${profileJson.id})`, {
+        headers: {Authorization: `Bearer ${accessToken}`}
+      });
+      if (eduRes.ok) educations = await eduRes.json();
+    } catch (e) {
+      console.warn('Education fetch failed (likely permission issue)', e.message);
+    }
+
+    // Store profile in session for the frontend to fetch briefly
+    req.session.linkedin_profile = {profile: profileJson, educations};
+
+    // Redirect back to frontend route with a flag
+    res.redirect('/qualifications?linkedin=done');
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('LinkedIn callback error');
+  }
+});
+
+// Frontend can call this endpoint after redirect to obtain the stored profile
+app.get('/api/auth/linkedin/profile', (req, res) => {
+  if (!req.session.linkedin_profile) return res.status(404).json({});
+  // Optionally clear it after returning
+  const p = req.session.linkedin_profile;
+  delete req.session.linkedin_profile;
+  res.json(p);
+});
+
+app.listen(3000, ()=>console.log('Server listening on 3000'));
+*/
+
+/* --------------------------- Notes & next steps ---------------------------
+- Make sure to register the correct redirect URI on the LinkedIn developer console.
+- For production, use HTTPS, secure sessions, CSRF protection, and store secrets safely.
+- If LinkedIn does not return educations via the regular profile API, you may need to request additional permissions or become a LinkedIn partner. See LinkedIn API docs.
+
+Relevant LinkedIn docs (for your reference - you can view them online):
+- Authorization code flow docs (how to perform 3-legged OAuth): https://learn.microsoft.com/en-us/linkedin/shared/authentication/authorization-code-flow
+- Profile API + restrictions: https://learn.microsoft.com/en-us/linkedin/shared/integrations/people/profile-api
+- Education/profile edit subresource: https://learn.microsoft.com/en-us/linkedin/shared/integrations/people/profile-edit-api/educations
+
+*/
